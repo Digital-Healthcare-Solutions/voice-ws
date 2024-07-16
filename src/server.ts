@@ -4,15 +4,60 @@ import WebSocket from "ws"
 import url from "url"
 import { handleSTT } from "./routes/stt/handler"
 import { handleTTS } from "./routes/tts/handler"
+import crypto from "crypto"
+import dotenv from "dotenv"
+
+dotenv.config()
+
+if (!process.env.ENCRYPTION_KEY) {
+  console.error("ENCRYPTION_KEY is not set in the environment variables.")
+  process.exit(1)
+}
 
 const app = express()
 const server = http.createServer(app)
 const wss = new WebSocket.Server({ noServer: true })
 
 const AUTH_SERVER_URL = process.env.AUTH_SERVER_URL || ""
+const PING_INTERVAL = 30000 // 30 seconds
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY!
 
-async function validateToken(token: string): Promise<boolean> {
+// Check key length
+if (Buffer.from(ENCRYPTION_KEY, "hex").length !== 32) {
+  console.error(
+    "Invalid encryption key length. Key must be 32 bytes (64 hexadecimal characters)."
+  )
+  process.exit(1)
+}
+
+function decrypt(text: string): string {
   try {
+    const [ivHex, encryptedHex] = text.split(":")
+    if (!ivHex || !encryptedHex) {
+      throw new Error("Invalid encrypted text format")
+    }
+
+    const iv = Buffer.from(ivHex, "hex")
+    const encryptedText = Buffer.from(encryptedHex, "hex")
+
+    const decipher = crypto.createDecipheriv(
+      "aes-256-cbc",
+      Buffer.from(ENCRYPTION_KEY, "hex"),
+      iv
+    )
+    let decrypted = decipher.update(encryptedText)
+    decrypted = Buffer.concat([decrypted, decipher.final()])
+
+    return decrypted.toString("utf8")
+  } catch (error) {
+    console.error("Decryption error:", error)
+    throw error
+  }
+}
+
+async function validateToken(encryptedToken: string): Promise<boolean> {
+  try {
+    const token = decrypt(encryptedToken)
     const response = await fetch(AUTH_SERVER_URL, {
       method: "GET",
       headers: {
@@ -21,11 +66,17 @@ async function validateToken(token: string): Promise<boolean> {
       },
     })
     const data = await response.json()
-    return data // Adjust based on your auth server's response structure
+    if (!response.ok) {
+      throw new Error(data.message)
+    }
+    return Boolean(data)
   } catch (error) {
     console.error("Token validation error:", error)
     return false
   }
+}
+function heartbeat(this: WebSocket) {
+  ;(this as any).isAlive = true
 }
 
 server.on("upgrade", async (request, socket, head) => {
@@ -39,29 +90,44 @@ server.on("upgrade", async (request, socket, head) => {
 
     const isValidToken = token ? await validateToken(token) : false
 
-    if (pathname === "/stt") {
-      console.log("STT route")
+    console.log("isValidToken", isValidToken)
+
+    if (pathname === "/stt" || pathname === "/tts") {
       wss.handleUpgrade(request, socket, head, (ws) => {
         if (!isValidToken || !token) {
           ws.close(3000, "Invalid token")
           return
         }
+
+        ;(ws as any).isAlive = true
+        ws.on("pong", heartbeat)
+
+        const pingInterval = setInterval(() => {
+          if ((ws as any).isAlive === false) {
+            console.log("Connection dead. Terminating.")
+            clearInterval(pingInterval)
+            return ws.terminate()
+          }
+
+          ;(ws as any).isAlive = false
+          ws.ping()
+        }, PING_INTERVAL)
+
+        ws.on("close", () => {
+          clearInterval(pingInterval)
+        })
+
         ws.send(
           JSON.stringify({ type: "ConnectionStatus", status: "authenticated" })
         )
-        handleSTT(ws)
-      })
-    } else if (pathname === "/tts") {
-      console.log("TTS route")
-      wss.handleUpgrade(request, socket, head, (ws) => {
-        if (!isValidToken || !token) {
-          ws.close(3000, "Invalid token")
-          return
+
+        if (pathname === "/stt") {
+          console.log("STT route")
+          handleSTT(ws)
+        } else {
+          console.log("TTS route")
+          handleTTS(ws)
         }
-        ws.send(
-          JSON.stringify({ type: "ConnectionStatus", status: "authenticated" })
-        )
-        handleTTS(ws)
       })
     } else {
       throw new Error("Invalid pathname")
