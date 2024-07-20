@@ -10,13 +10,15 @@ dotenv_1.default.config();
 const deepgramClient = (0, sdk_1.createClient)(process.env.DEEPGRAM_API_KEY);
 let keepAlive = null;
 const KEEP_ALIVE_INTERVAL = 10 * 1000; // 10 seconds
-const setupDeepgram = (ws) => {
+const setupDeepgram = (ws, lang) => {
     console.log("Setting up Deepgram connection...");
     const deepgram = deepgramClient.listen.live({
         smart_format: true,
-        model: "nova-2-medical",
+        model: lang === "en-US" ? "nova-2-medical" : "nova-2",
         interim_results: true,
         diarize: true,
+        language: lang,
+        endpointing: 100,
     });
     if (keepAlive)
         clearInterval(keepAlive);
@@ -76,14 +78,24 @@ const setupDeepgram = (ws) => {
     // }
     return deepgram;
 };
-function handleSTT(ws) {
+function handleSTT(ws, lang) {
     console.log("STT: New WebSocket connection established");
-    let deepgramWrapper = setupDeepgram(ws);
+    let deepgramWrapper = setupDeepgram(ws, lang);
     let messageCount = 0;
     ws.on("message", (message) => {
         messageCount++;
         console.log(`STT: Received audio data (Message #${messageCount})`);
         console.log(`Deepgram Ready State: ${deepgramWrapper.getReadyState()}`);
+        //looking for if message === {type:"ping"}
+        if (message.toString().includes("ping")) {
+            console.log("STT: Received ping message");
+            const parsedMessage = JSON.parse(message.toString());
+            if (parsedMessage.type === "ping") {
+                console.log("STT: Received ping message");
+                ws.send(JSON.stringify({ type: "pong" }));
+                return;
+            }
+        }
         if (deepgramWrapper.getReadyState() === 1 /* OPEN */) {
             console.log(`STT: Sending data to Deepgram (Message #${messageCount})`);
             console.log("ws: data sent to deepgram");
@@ -95,7 +107,7 @@ function handleSTT(ws) {
             /* Attempt to reopen the Deepgram connection */
             deepgramWrapper.requestClose();
             deepgramWrapper.removeAllListeners();
-            deepgramWrapper = setupDeepgram(ws);
+            deepgramWrapper = setupDeepgram(ws, lang);
         }
         else {
             console.log(`STT: Cannot send to Deepgram. Current state: ${deepgramWrapper.getReadyState()} (Message #${messageCount})`);
