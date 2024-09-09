@@ -10,7 +10,21 @@ dotenv_1.default.config();
 const deepgramClient = (0, sdk_1.createClient)(process.env.DEEPGRAM_API_KEY);
 let keepAlive = null;
 const KEEP_ALIVE_INTERVAL = 10 * 1000; // 10 seconds
-const setupDeepgram = (ws, lang) => {
+const defaultMedicalKeywords = [
+    "Metoprolol:1",
+    "Lisinopril:1",
+    "Atorvastatin:1",
+    "Levothyroxine:1",
+    "Amlodipine:1",
+    "Simvastatin:1",
+    "Omeprazole:1",
+    "Losartan:1",
+    "Albuterol:1",
+    "Topamax:1",
+    "Lamictal:1",
+    "Gabapentin:1",
+];
+const setupDeepgram = (ws, lang, keywords, utteranceTime, findAndReplaceStrings) => {
     console.log("Setting up Deepgram connection...");
     const deepgram = deepgramClient.listen.live({
         smart_format: true,
@@ -19,6 +33,9 @@ const setupDeepgram = (ws, lang) => {
         diarize: true,
         language: lang,
         endpointing: 100,
+        keywords: defaultMedicalKeywords.concat(keywords),
+        replace: findAndReplaceStrings,
+        utterance_end_ms: utteranceTime,
     });
     if (keepAlive)
         clearInterval(keepAlive);
@@ -78,9 +95,9 @@ const setupDeepgram = (ws, lang) => {
     // }
     return deepgram;
 };
-function handleSTT(ws, lang) {
+function handleSTT(ws, lang, keywords, utteranceTime, findAndReplaceStrings) {
     console.log("STT: New WebSocket connection established");
-    let deepgramWrapper = setupDeepgram(ws, lang);
+    let deepgramWrapper = setupDeepgram(ws, lang, keywords, utteranceTime, findAndReplaceStrings);
     let messageCount = 0;
     ws.on("message", (message) => {
         messageCount++;
@@ -107,7 +124,7 @@ function handleSTT(ws, lang) {
             /* Attempt to reopen the Deepgram connection */
             deepgramWrapper.requestClose();
             deepgramWrapper.removeAllListeners();
-            deepgramWrapper = setupDeepgram(ws, lang);
+            deepgramWrapper = setupDeepgram(ws, lang, keywords, utteranceTime, findAndReplaceStrings);
         }
         else {
             console.log(`STT: Cannot send to Deepgram. Current state: ${deepgramWrapper.getReadyState()} (Message #${messageCount})`);

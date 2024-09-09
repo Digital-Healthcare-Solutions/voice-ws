@@ -9,7 +9,27 @@ let keepAlive: NodeJS.Timeout | null = null
 
 const KEEP_ALIVE_INTERVAL = 10 * 1000 // 10 seconds
 
-const setupDeepgram = (ws: WebSocket, lang: string) => {
+const defaultMedicalKeywords = [
+  "Metoprolol:1",
+  "Lisinopril:1",
+  "Atorvastatin:1",
+  "Levothyroxine:1",
+  "Amlodipine:1",
+  "Simvastatin:1",
+  "Omeprazole:1",
+  "Losartan:1",
+  "Albuterol:1",
+  "Topamax:1",
+  "Lamictal:1",
+  "Gabapentin:1",
+]
+const setupDeepgram = (
+  ws: WebSocket,
+  lang: string,
+  keywords: string[],
+  utteranceTime: number,
+  findAndReplaceStrings: string[]
+) => {
   console.log("Setting up Deepgram connection...")
   const deepgram = deepgramClient.listen.live({
     smart_format: true,
@@ -18,6 +38,9 @@ const setupDeepgram = (ws: WebSocket, lang: string) => {
     diarize: true,
     language: lang,
     endpointing: 100,
+    keywords: defaultMedicalKeywords.concat(keywords),
+    replace: findAndReplaceStrings,
+    utterance_end_ms: utteranceTime,
   })
 
   if (keepAlive) clearInterval(keepAlive)
@@ -88,9 +111,21 @@ const setupDeepgram = (ws: WebSocket, lang: string) => {
   return deepgram
 }
 
-export function handleSTT(ws: WebSocket, lang: string) {
+export function handleSTT(
+  ws: WebSocket,
+  lang: string,
+  keywords: string[],
+  utteranceTime: number,
+  findAndReplaceStrings: string[]
+) {
   console.log("STT: New WebSocket connection established")
-  let deepgramWrapper = setupDeepgram(ws, lang)
+  let deepgramWrapper = setupDeepgram(
+    ws,
+    lang,
+    keywords,
+    utteranceTime,
+    findAndReplaceStrings
+  )
   let messageCount = 0
 
   ws.on("message", (message: WebSocket.Data) => {
@@ -119,7 +154,13 @@ export function handleSTT(ws: WebSocket, lang: string) {
       /* Attempt to reopen the Deepgram connection */
       deepgramWrapper.requestClose()
       deepgramWrapper.removeAllListeners()
-      deepgramWrapper = setupDeepgram(ws, lang)
+      deepgramWrapper = setupDeepgram(
+        ws,
+        lang,
+        keywords,
+        utteranceTime,
+        findAndReplaceStrings
+      )
     } else {
       console.log(
         `STT: Cannot send to Deepgram. Current state: ${deepgramWrapper.getReadyState()} (Message #${messageCount})`

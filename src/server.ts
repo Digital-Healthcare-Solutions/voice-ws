@@ -32,12 +32,19 @@ server.on("upgrade", async (request, socket, head) => {
   let pathname: string | null = null
   let token: string | null = null
   let langauge: string = "en-US"
+  let keywords: string[] = []
+  let utteranceTime: number = 1000
+  let findAndReplaceStrings: string[] = []
 
   try {
     const url = new URL(request.url || "", `http://${request.headers.host}`)
     pathname = url.pathname
     token = url.searchParams.get("token")
     langauge = url.searchParams.get("lang") || "en-US"
+    keywords = url.searchParams.get("keywords")?.split(",") || []
+    utteranceTime = parseInt(url.searchParams.get("utteranceTime") || "1000")
+    findAndReplaceStrings =
+      url.searchParams.get("findAndReplace")?.split(",") || []
 
     const isValidToken = token ? await validateToken(token) : false
 
@@ -51,7 +58,7 @@ server.on("upgrade", async (request, socket, head) => {
         ws.send(
           JSON.stringify({ type: "ConnectionStatus", status: "authenticated" })
         )
-        handleSTT(ws, langauge)
+        handleSTT(ws, langauge, keywords, utteranceTime, findAndReplaceStrings)
       })
     } else if (pathname === "/tts") {
       console.log("TTS route")

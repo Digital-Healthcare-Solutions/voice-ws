@@ -41,14 +41,22 @@ function validateToken(token) {
     });
 }
 server.on("upgrade", (request, socket, head) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
     let pathname = null;
     let token = null;
     let langauge = "en-US";
+    let keywords = [];
+    let utteranceTime = 1000;
+    let findAndReplaceStrings = [];
     try {
         const url = new URL(request.url || "", `http://${request.headers.host}`);
         pathname = url.pathname;
         token = url.searchParams.get("token");
         langauge = url.searchParams.get("lang") || "en-US";
+        keywords = ((_a = url.searchParams.get("keywords")) === null || _a === void 0 ? void 0 : _a.split(",")) || [];
+        utteranceTime = parseInt(url.searchParams.get("utteranceTime") || "1000");
+        findAndReplaceStrings =
+            ((_b = url.searchParams.get("findAndReplace")) === null || _b === void 0 ? void 0 : _b.split(",")) || [];
         const isValidToken = token ? yield validateToken(token) : false;
         if (pathname === "/stt") {
             console.log("STT route");
@@ -58,7 +66,7 @@ server.on("upgrade", (request, socket, head) => __awaiter(void 0, void 0, void 0
                     return;
                 }
                 ws.send(JSON.stringify({ type: "ConnectionStatus", status: "authenticated" }));
-                (0, handler_1.handleSTT)(ws, langauge);
+                (0, handler_1.handleSTT)(ws, langauge, keywords, utteranceTime, findAndReplaceStrings);
             });
         }
         else if (pathname === "/tts") {
