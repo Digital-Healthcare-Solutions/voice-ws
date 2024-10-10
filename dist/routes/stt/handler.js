@@ -8,7 +8,6 @@ const sdk_1 = require("@deepgram/sdk");
 const dotenv_1 = __importDefault(require("dotenv"));
 dotenv_1.default.config();
 const deepgramClient = (0, sdk_1.createClient)(process.env.DEEPGRAM_API_KEY);
-let keepAlive = null;
 const KEEP_ALIVE_INTERVAL = 3 * 1000; // 3 seconds
 const defaultMedicalKeywords = [
     "Metoprolol:1",
@@ -26,6 +25,7 @@ const defaultMedicalKeywords = [
 ];
 const setupDeepgram = (ws, lang, keywords, utteranceTime, findAndReplaceStrings) => {
     console.log("Setting up Deepgram connection...");
+    let keepAlive = null;
     const deepgram = deepgramClient.listen.live({
         smart_format: true,
         model: lang === "en-US" ? "nova-2-medical" : "nova-2",
@@ -102,7 +102,12 @@ function handleSTT(ws, lang, keywords, utteranceTime, findAndReplaceStrings) {
     ws.on("message", (message) => {
         messageCount++;
         console.log(`STT: Received audio data (Message #${messageCount})`);
-        console.log(`Deepgram Ready State: ${deepgramWrapper.getReadyState()}`);
+        if (deepgramWrapper) {
+            console.log(`Deepgram Ready State: ${deepgramWrapper.getReadyState()}`);
+        }
+        else {
+            console.log("Deepgram Wrapper is null");
+        }
         //looking for if message === {type:"ping"}
         if (message.toString().includes("ping")) {
             console.log("STT: Received ping message");
@@ -113,12 +118,13 @@ function handleSTT(ws, lang, keywords, utteranceTime, findAndReplaceStrings) {
                 return;
             }
         }
-        if (deepgramWrapper.getReadyState() === 1 /* OPEN */) {
+        if (deepgramWrapper && deepgramWrapper.getReadyState() === 1 /* OPEN */) {
             console.log(`STT: Sending data to Deepgram (Message #${messageCount})`);
             console.log("ws: data sent to deepgram");
             deepgramWrapper.send(message);
         }
-        else if (deepgramWrapper.getReadyState() >= 2 /* 2 = CLOSING, 3 = CLOSED */) {
+        else if (deepgramWrapper &&
+            deepgramWrapper.getReadyState() >= 2 /* 2 = CLOSING, 3 = CLOSED */) {
             console.log("ws: data couldn't be sent to deepgram");
             console.log("ws: retrying connection to deepgram");
             /* Attempt to reopen the Deepgram connection */
@@ -127,17 +133,19 @@ function handleSTT(ws, lang, keywords, utteranceTime, findAndReplaceStrings) {
             deepgramWrapper = setupDeepgram(ws, lang, keywords, utteranceTime, findAndReplaceStrings);
         }
         else {
-            console.log(`STT: Cannot send to Deepgram. Current state: ${deepgramWrapper.getReadyState()} (Message #${messageCount})`);
+            console.log(`STT: Cannot send to Deepgram. Current state: ${deepgramWrapper ? deepgramWrapper.getReadyState() : "null"} (Message #${messageCount})`);
         }
     });
     ws.on("close", () => {
         console.log("STT: WebSocket connection closed");
-        deepgramWrapper.requestClose();
-        deepgramWrapper.removeAllListeners();
-        //@ts-ignore
+        deepgramWrapper === null || deepgramWrapper === void 0 ? void 0 : deepgramWrapper.requestClose();
+        deepgramWrapper === null || deepgramWrapper === void 0 ? void 0 : deepgramWrapper.removeAllListeners();
         deepgramWrapper = null;
     });
     ws.on("error", (error) => {
         console.error("STT: WebSocket error", error);
+        deepgramWrapper === null || deepgramWrapper === void 0 ? void 0 : deepgramWrapper.requestClose();
+        deepgramWrapper === null || deepgramWrapper === void 0 ? void 0 : deepgramWrapper.removeAllListeners();
+        deepgramWrapper = null;
     });
 }

@@ -1,11 +1,14 @@
 import WebSocket from "ws"
-import { createClient, LiveTranscriptionEvents } from "@deepgram/sdk"
+import {
+  createClient,
+  ListenLiveClient,
+  LiveTranscriptionEvents,
+} from "@deepgram/sdk"
 import dotenv from "dotenv"
 
 dotenv.config()
 
 const deepgramClient = createClient(process.env.DEEPGRAM_API_KEY as string)
-let keepAlive: NodeJS.Timeout | null = null
 
 const KEEP_ALIVE_INTERVAL = 3 * 1000 // 3 seconds
 
@@ -31,6 +34,9 @@ const setupDeepgram = (
   findAndReplaceStrings: string[]
 ) => {
   console.log("Setting up Deepgram connection...")
+
+  let keepAlive: NodeJS.Timeout | null = null
+
   const deepgram = deepgramClient.listen.live({
     smart_format: true,
     model: lang === "en-US" ? "nova-2-medical" : "nova-2",
@@ -119,7 +125,7 @@ export function handleSTT(
   findAndReplaceStrings: string[]
 ) {
   console.log("STT: New WebSocket connection established")
-  let deepgramWrapper = setupDeepgram(
+  let deepgramWrapper: ListenLiveClient | null = setupDeepgram(
     ws,
     lang,
     keywords,
@@ -131,7 +137,11 @@ export function handleSTT(
   ws.on("message", (message: WebSocket.Data) => {
     messageCount++
     console.log(`STT: Received audio data (Message #${messageCount})`)
-    console.log(`Deepgram Ready State: ${deepgramWrapper.getReadyState()}`)
+    if (deepgramWrapper) {
+      console.log(`Deepgram Ready State: ${deepgramWrapper.getReadyState()}`)
+    } else {
+      console.log("Deepgram Wrapper is null")
+    }
     //looking for if message === {type:"ping"}
     if (message.toString().includes("ping")) {
       console.log("STT: Received ping message")
@@ -142,11 +152,12 @@ export function handleSTT(
         return
       }
     }
-    if (deepgramWrapper.getReadyState() === 1 /* OPEN */) {
+    if (deepgramWrapper && deepgramWrapper.getReadyState() === 1 /* OPEN */) {
       console.log(`STT: Sending data to Deepgram (Message #${messageCount})`)
       console.log("ws: data sent to deepgram")
       deepgramWrapper.send(message as Buffer)
     } else if (
+      deepgramWrapper &&
       deepgramWrapper.getReadyState() >= 2 /* 2 = CLOSING, 3 = CLOSED */
     ) {
       console.log("ws: data couldn't be sent to deepgram")
@@ -163,20 +174,24 @@ export function handleSTT(
       )
     } else {
       console.log(
-        `STT: Cannot send to Deepgram. Current state: ${deepgramWrapper.getReadyState()} (Message #${messageCount})`
+        `STT: Cannot send to Deepgram. Current state: ${
+          deepgramWrapper ? deepgramWrapper.getReadyState() : "null"
+        } (Message #${messageCount})`
       )
     }
   })
 
   ws.on("close", () => {
     console.log("STT: WebSocket connection closed")
-    deepgramWrapper.requestClose()
-    deepgramWrapper.removeAllListeners()
-    //@ts-ignore
+    deepgramWrapper?.requestClose()
+    deepgramWrapper?.removeAllListeners()
     deepgramWrapper = null
   })
 
   ws.on("error", (error) => {
     console.error("STT: WebSocket error", error)
+    deepgramWrapper?.requestClose()
+    deepgramWrapper?.removeAllListeners()
+    deepgramWrapper = null
   })
 }
