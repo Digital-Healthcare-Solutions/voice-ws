@@ -7,7 +7,7 @@ dotenv.config()
 const deepgramClient = createClient(process.env.DEEPGRAM_API_KEY as string)
 let keepAlive: NodeJS.Timeout | null = null
 
-const KEEP_ALIVE_INTERVAL = 10 * 1000 // 10 seconds
+const KEEP_ALIVE_INTERVAL = 3 * 1000 // 3 seconds
 
 const defaultMedicalKeywords = [
   "Metoprolol:1",

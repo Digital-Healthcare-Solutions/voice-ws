@@ -17,6 +17,7 @@ const http_1 = __importDefault(require("http"));
 const ws_1 = __importDefault(require("ws"));
 const handler_1 = require("./routes/stt/handler");
 const handler_2 = require("./routes/tts/handler");
+const crypto_1 = require("./utils/crypto");
 const app = (0, express_1.default)();
 const server = http_1.default.createServer(app);
 const wss = new ws_1.default.Server({ noServer: true });
@@ -32,11 +33,14 @@ function validateToken(token) {
                 },
             });
             const data = yield response.json();
-            return data; // Adjust based on your auth server's response structure
+            // console.log("Token validation response:", data)
+            if (!response.ok) {
+                throw new Error("Invalid token");
+            }
+            return data;
         }
         catch (error) {
-            console.error("Token validation error:", error);
-            return false;
+            throw new Error("Error Authenticating");
         }
     });
 }
@@ -57,6 +61,9 @@ server.on("upgrade", (request, socket, head) => __awaiter(void 0, void 0, void 0
         utteranceTime = parseInt(url.searchParams.get("utteranceTime") || "1000");
         findAndReplaceStrings =
             ((_b = url.searchParams.get("findAndReplace")) === null || _b === void 0 ? void 0 : _b.split(",")) || [];
+        if (token) {
+            token = (0, crypto_1.decryptToken)(token);
+        }
         const isValidToken = token ? yield validateToken(token) : false;
         if (pathname === "/stt") {
             console.log("STT route");
@@ -101,7 +108,7 @@ server.on("upgrade", (request, socket, head) => __awaiter(void 0, void 0, void 0
 app.get("/", (req, res) => {
     res.send("Status: OK");
 });
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 server.listen(PORT, () => {
     console.log(`⚡️ [server]: Server is running on port ${PORT}`);
 });

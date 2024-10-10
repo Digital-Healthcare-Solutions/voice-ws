@@ -4,6 +4,7 @@ import WebSocket from "ws"
 import url from "url"
 import { handleSTT } from "./routes/stt/handler"
 import { handleTTS } from "./routes/tts/handler"
+import { decryptToken } from "./utils/crypto"
 
 const app = express()
 const server = http.createServer(app)
@@ -21,10 +22,13 @@ async function validateToken(token: string): Promise<boolean> {
       },
     })
     const data = await response.json()
-    return data // Adjust based on your auth server's response structure
+    // console.log("Token validation response:", data)
+    if (!response.ok) {
+      throw new Error("Invalid token")
+    }
+    return data
   } catch (error) {
-    console.error("Token validation error:", error)
-    return false
+    throw new Error("Error Authenticating")
   }
 }
 
@@ -45,6 +49,10 @@ server.on("upgrade", async (request, socket, head) => {
     utteranceTime = parseInt(url.searchParams.get("utteranceTime") || "1000")
     findAndReplaceStrings =
       url.searchParams.get("findAndReplace")?.split(",") || []
+
+    if (token) {
+      token = decryptToken(token)
+    }
 
     const isValidToken = token ? await validateToken(token) : false
 
@@ -98,7 +106,7 @@ app.get("/", (req, res) => {
   res.send("Status: OK")
 })
 
-const PORT = process.env.PORT || 5000
+const PORT = process.env.PORT || 5001
 server.listen(PORT, () => {
   console.log(`⚡️ [server]: Server is running on port ${PORT}`)
 })

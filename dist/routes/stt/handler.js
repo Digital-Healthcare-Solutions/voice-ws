@@ -9,7 +9,7 @@ const dotenv_1 = __importDefault(require("dotenv"));
 dotenv_1.default.config();
 const deepgramClient = (0, sdk_1.createClient)(process.env.DEEPGRAM_API_KEY);
 let keepAlive = null;
-const KEEP_ALIVE_INTERVAL = 10 * 1000; // 10 seconds
+const KEEP_ALIVE_INTERVAL = 3 * 1000; // 3 seconds
 const defaultMedicalKeywords = [
     "Metoprolol:1",
     "Lisinopril:1",
