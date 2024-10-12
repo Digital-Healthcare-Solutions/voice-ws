@@ -1,7 +1,6 @@
 import express from "express"
 import http from "http"
 import WebSocket from "ws"
-import url from "url"
 import { handleSTT } from "./routes/stt/handler"
 import { handleTTS } from "./routes/tts/handler"
 import { decryptToken } from "./utils/crypto"
@@ -28,7 +27,7 @@ async function validateToken(token: string): Promise<boolean> {
     }
     return data
   } catch (error) {
-    throw new Error("Error Authenticating")
+    throw new Error("Error Authenticating" + error)
   }
 }
 

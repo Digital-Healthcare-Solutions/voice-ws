@@ -7,7 +7,6 @@ exports.handleSTT = handleSTT;
 const sdk_1 = require("@deepgram/sdk");
 const dotenv_1 = __importDefault(require("dotenv"));
 dotenv_1.default.config();
-const deepgramClient = (0, sdk_1.createClient)(process.env.DEEPGRAM_API_KEY);
 const KEEP_ALIVE_INTERVAL = 3 * 1000; // 3 seconds
 const defaultMedicalKeywords = [
     "Metoprolol:1",
@@ -24,6 +23,7 @@ const defaultMedicalKeywords = [
     "Gabapentin:1",
 ];
 const setupDeepgram = (ws, lang, keywords, utteranceTime, findAndReplaceStrings) => {
+    const deepgramClient = (0, sdk_1.createClient)(process.env.DEEPGRAM_API_KEY);
     console.log("Setting up Deepgram connection...");
     let keepAlive = null;
     const deepgram = deepgramClient.listen.live({
@@ -55,7 +55,6 @@ const setupDeepgram = (ws, lang, keywords, utteranceTime, findAndReplaceStrings)
     //   }, KEEP_ALIVE_INTERVAL)
     //   return keepAliveInterval
     // }
-    let keepAliveInterval = null;
     deepgram.addListener(sdk_1.LiveTranscriptionEvents.Open, () => {
         console.log("Deepgram: Connected successfully");
     });
@@ -69,35 +68,34 @@ const setupDeepgram = (ws, lang, keywords, utteranceTime, findAndReplaceStrings)
     });
     deepgram.addListener(sdk_1.LiveTranscriptionEvents.Close, () => {
         console.log("Deepgram: Connection closed");
-        if (keepAliveInterval) {
-            clearInterval(keepAliveInterval);
+        if (keepAlive) {
+            clearInterval(keepAlive);
         }
     });
     deepgram.addListener(sdk_1.LiveTranscriptionEvents.Error, (error) => {
         console.error("Deepgram: Error received", error);
+        if (keepAlive) {
+            clearInterval(keepAlive);
+        }
         ws.send(JSON.stringify({ error: "Deepgram error occurred" }));
     });
-    // return {
-    //   send: (data: Buffer) => {
-    //     if (deepgram.getReadyState() === 1) {
-    //       deepgram.send(data)
-    //       return true
-    //     }
-    //     return false
-    //   },
-    //   getReadyState: () => deepgram.getReadyState(),
-    //   finish: () => {
-    //     if (keepAliveInterval) {
-    //       clearInterval(keepAliveInterval)
-    //     }
-    //     deepgram.requestClose()
-    //   },
-    // }
-    return deepgram;
+    const finish = () => {
+        if (keepAlive) {
+            clearInterval(keepAlive);
+            keepAlive = null;
+        }
+        deepgram.requestClose();
+        deepgram.removeAllListeners();
+    };
+    return {
+        deepgram,
+        finish,
+    };
 };
 function handleSTT(ws, lang, keywords, utteranceTime, findAndReplaceStrings) {
     console.log("STT: New WebSocket connection established");
-    let deepgramWrapper = setupDeepgram(ws, lang, keywords, utteranceTime, findAndReplaceStrings);
+    let { deepgram, finish } = setupDeepgram(ws, lang, keywords, utteranceTime, findAndReplaceStrings);
+    let deepgramWrapper = deepgram;
     let messageCount = 0;
     ws.on("message", (message) => {
         messageCount++;
@@ -108,7 +106,7 @@ function handleSTT(ws, lang, keywords, utteranceTime, findAndReplaceStrings) {
         else {
             console.log("Deepgram Wrapper is null");
         }
-        //looking for if message === {type:"ping"}
+        // Handle ping messages
         if (message.toString().includes("ping")) {
             console.log("STT: Received ping message");
             const parsedMessage = JSON.parse(message.toString());
@@ -120,17 +118,17 @@ function handleSTT(ws, lang, keywords, utteranceTime, findAndReplaceStrings) {
         }
         if (deepgramWrapper && deepgramWrapper.getReadyState() === 1 /* OPEN */) {
             console.log(`STT: Sending data to Deepgram (Message #${messageCount})`);
-            console.log("ws: data sent to deepgram");
             deepgramWrapper.send(message);
         }
         else if (deepgramWrapper &&
             deepgramWrapper.getReadyState() >= 2 /* 2 = CLOSING, 3 = CLOSED */) {
-            console.log("ws: data couldn't be sent to deepgram");
-            console.log("ws: retrying connection to deepgram");
-            /* Attempt to reopen the Deepgram connection */
-            deepgramWrapper.requestClose();
-            deepgramWrapper.removeAllListeners();
-            deepgramWrapper = setupDeepgram(ws, lang, keywords, utteranceTime, findAndReplaceStrings);
+            console.log("STT: Deepgram connection is closing or closed, attempting to reopen.");
+            finish();
+            // Re-initialize Deepgram connection
+            const result = setupDeepgram(ws, lang, keywords, utteranceTime, findAndReplaceStrings);
+            // Update deepgramWrapper and finish with new instances
+            deepgramWrapper = result.deepgram;
+            finish = result.finish;
         }
         else {
             console.log(`STT: Cannot send to Deepgram. Current state: ${deepgramWrapper ? deepgramWrapper.getReadyState() : "null"} (Message #${messageCount})`);
@@ -138,14 +136,13 @@ function handleSTT(ws, lang, keywords, utteranceTime, findAndReplaceStrings) {
     });
     ws.on("close", () => {
         console.log("STT: WebSocket connection closed");
-        deepgramWrapper === null || deepgramWrapper === void 0 ? void 0 : deepgramWrapper.requestClose();
-        deepgramWrapper === null || deepgramWrapper === void 0 ? void 0 : deepgramWrapper.removeAllListeners();
+        finish();
+        ws.removeAllListeners(); // remove all listeners
         deepgramWrapper = null;
     });
     ws.on("error", (error) => {
         console.error("STT: WebSocket error", error);
-        deepgramWrapper === null || deepgramWrapper === void 0 ? void 0 : deepgramWrapper.requestClose();
-        deepgramWrapper === null || deepgramWrapper === void 0 ? void 0 : deepgramWrapper.removeAllListeners();
+        finish();
         deepgramWrapper = null;
     });
 }

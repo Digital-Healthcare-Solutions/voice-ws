@@ -8,8 +8,6 @@ import dotenv from "dotenv"
 
 dotenv.config()
 
-const deepgramClient = createClient(process.env.DEEPGRAM_API_KEY as string)
-
 const KEEP_ALIVE_INTERVAL = 3 * 1000 // 3 seconds
 
 const defaultMedicalKeywords = [
@@ -33,6 +31,8 @@ const setupDeepgram = (
   utteranceTime: number,
   findAndReplaceStrings: string[]
 ) => {
+  const deepgramClient = createClient(process.env.DEEPGRAM_API_KEY as string)
+
   console.log("Setting up Deepgram connection...")
 
   let keepAlive: NodeJS.Timeout | null = null
@@ -70,8 +70,6 @@ const setupDeepgram = (
   //   return keepAliveInterval
   // }
 
-  let keepAliveInterval: NodeJS.Timeout | null = null
-
   deepgram.addListener(LiveTranscriptionEvents.Open, () => {
     console.log("Deepgram: Connected successfully")
   })
@@ -88,33 +86,32 @@ const setupDeepgram = (
 
   deepgram.addListener(LiveTranscriptionEvents.Close, () => {
     console.log("Deepgram: Connection closed")
-    if (keepAliveInterval) {
-      clearInterval(keepAliveInterval)
+    if (keepAlive) {
+      clearInterval(keepAlive)
     }
   })
 
   deepgram.addListener(LiveTranscriptionEvents.Error, (error) => {
     console.error("Deepgram: Error received", error)
+    if (keepAlive) {
+      clearInterval(keepAlive)
+    }
     ws.send(JSON.stringify({ error: "Deepgram error occurred" }))
   })
 
-  // return {
-  //   send: (data: Buffer) => {
-  //     if (deepgram.getReadyState() === 1) {
-  //       deepgram.send(data)
-  //       return true
-  //     }
-  //     return false
-  //   },
-  //   getReadyState: () => deepgram.getReadyState(),
-  //   finish: () => {
-  //     if (keepAliveInterval) {
-  //       clearInterval(keepAliveInterval)
-  //     }
-  //     deepgram.requestClose()
-  //   },
-  // }
-  return deepgram
+  const finish = () => {
+    if (keepAlive) {
+      clearInterval(keepAlive)
+      keepAlive = null
+    }
+    deepgram.requestClose()
+    deepgram.removeAllListeners()
+  }
+
+  return {
+    deepgram,
+    finish,
+  }
 }
 
 export function handleSTT(
@@ -125,13 +122,15 @@ export function handleSTT(
   findAndReplaceStrings: string[]
 ) {
   console.log("STT: New WebSocket connection established")
-  let deepgramWrapper: ListenLiveClient | null = setupDeepgram(
+  let { deepgram, finish } = setupDeepgram(
     ws,
     lang,
     keywords,
     utteranceTime,
     findAndReplaceStrings
   )
+  let deepgramWrapper: ListenLiveClient | null = deepgram
+
   let messageCount = 0
 
   ws.on("message", (message: WebSocket.Data) => {
@@ -142,7 +141,7 @@ export function handleSTT(
     } else {
       console.log("Deepgram Wrapper is null")
     }
-    //looking for if message === {type:"ping"}
+    // Handle ping messages
     if (message.toString().includes("ping")) {
       console.log("STT: Received ping message")
       const parsedMessage = JSON.parse(message.toString())
@@ -154,24 +153,27 @@ export function handleSTT(
     }
     if (deepgramWrapper && deepgramWrapper.getReadyState() === 1 /* OPEN */) {
       console.log(`STT: Sending data to Deepgram (Message #${messageCount})`)
-      console.log("ws: data sent to deepgram")
       deepgramWrapper.send(message as Buffer)
     } else if (
       deepgramWrapper &&
       deepgramWrapper.getReadyState() >= 2 /* 2 = CLOSING, 3 = CLOSED */
     ) {
-      console.log("ws: data couldn't be sent to deepgram")
-      console.log("ws: retrying connection to deepgram")
-      /* Attempt to reopen the Deepgram connection */
-      deepgramWrapper.requestClose()
-      deepgramWrapper.removeAllListeners()
-      deepgramWrapper = setupDeepgram(
+      console.log(
+        "STT: Deepgram connection is closing or closed, attempting to reopen."
+      )
+      finish()
+      // Re-initialize Deepgram connection
+      const result = setupDeepgram(
         ws,
         lang,
         keywords,
         utteranceTime,
         findAndReplaceStrings
       )
+
+      // Update deepgramWrapper and finish with new instances
+      deepgramWrapper = result.deepgram
+      finish = result.finish
     } else {
       console.log(
         `STT: Cannot send to Deepgram. Current state: ${
@@ -183,15 +185,14 @@ export function handleSTT(
 
   ws.on("close", () => {
     console.log("STT: WebSocket connection closed")
-    deepgramWrapper?.requestClose()
-    deepgramWrapper?.removeAllListeners()
+    finish()
+    ws.removeAllListeners() // remove all listeners
     deepgramWrapper = null
   })
 
   ws.on("error", (error) => {
     console.error("STT: WebSocket error", error)
-    deepgramWrapper?.requestClose()
-    deepgramWrapper?.removeAllListeners()
+    finish()
     deepgramWrapper = null
   })
 }

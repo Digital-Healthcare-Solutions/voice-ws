@@ -40,7 +40,7 @@ function validateToken(token) {
             return data;
         }
         catch (error) {
-            throw new Error("Error Authenticating");
+            throw new Error("Error Authenticating" + error);
         }
     });
 }
