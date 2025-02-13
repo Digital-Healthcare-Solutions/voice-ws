@@ -11,80 +11,121 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
+var _a;
 Object.defineProperty(exports, "__esModule", { value: true });
+// server.ts
 const express_1 = __importDefault(require("express"));
 const http_1 = __importDefault(require("http"));
 const ws_1 = __importDefault(require("ws"));
 const handler_1 = require("./routes/stt/handler");
 const handler_2 = require("./routes/tts/handler");
 const crypto_1 = require("./utils/crypto");
+const handler_3 = require("./routes/voice-agent/handler");
+const VoiceResponse_1 = __importDefault(require("twilio/lib/twiml/VoiceResponse"));
 const app = (0, express_1.default)();
 const server = http_1.default.createServer(app);
 const wss = new ws_1.default.Server({ noServer: true });
-const AUTH_SERVER_URL = process.env.AUTH_SERVER_URL || "";
-function validateToken(token) {
+// Express middleware
+app.use(express_1.default.json());
+app.use(express_1.default.urlencoded({ extended: true }));
+// HTTP Routes
+app.get("/", (req, res) => {
+    res.send("Server is running");
+});
+// Express route for incoming Twilio calls
+app.post("/call/incoming", (_, res) => {
+    const twiml = new VoiceResponse_1.default();
+    const connect = twiml.connect();
+    const stream = connect.stream({
+        url: `wss://${process.env.SERVER_DOMAIN}/voice-agent?apiKey=test`,
+    });
+    stream.parameter({
+        name: "apiKey",
+        value: "test",
+    });
+    res.writeHead(200, { "Content-Type": "text/xml" });
+    res.end(twiml.toString());
+});
+const API_KEYS = new Set(((_a = process.env.ALLOWED_API_KEYS) === null || _a === void 0 ? void 0 : _a.split(",")) || []);
+function validateAuth(authType, value) {
     return __awaiter(this, void 0, void 0, function* () {
-        try {
-            const response = yield fetch(AUTH_SERVER_URL, {
-                method: "GET",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
-                },
-            });
-            const data = yield response.json();
-            // console.log("Token validation response:", data)
-            if (!response.ok) {
-                throw new Error("Invalid token");
-            }
-            return data;
+        if (authType === "apiKey") {
+            return API_KEYS.has(value);
         }
-        catch (error) {
-            throw new Error("Error Authenticating" + error);
+        else {
+            try {
+                const response = yield fetch(process.env.AUTH_SERVER_URL || "", {
+                    method: "GET",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${value}`,
+                    },
+                });
+                const data = yield response.json();
+                return response.ok && data;
+            }
+            catch (error) {
+                console.error("Auth error:", error);
+                return false;
+            }
         }
     });
 }
+// Function to check if request is from Twilio
+function isTwilioRequest(request) {
+    // Check if X-Twilio-Signature header exists
+    return !!request.headers["x-twilio-signature"];
+}
 server.on("upgrade", (request, socket, head) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
-    let pathname = null;
-    let token = null;
-    let langauge = "en-US";
-    let keywords = [];
-    let utteranceTime = 1000;
-    let findAndReplaceStrings = [];
     try {
         const url = new URL(request.url || "", `http://${request.headers.host}`);
-        pathname = url.pathname;
-        token = url.searchParams.get("token");
-        langauge = url.searchParams.get("lang") || "en-US";
-        keywords = ((_a = url.searchParams.get("keywords")) === null || _a === void 0 ? void 0 : _a.split(",")) || [];
-        utteranceTime = parseInt(url.searchParams.get("utteranceTime") || "1000");
-        findAndReplaceStrings =
-            ((_b = url.searchParams.get("findAndReplace")) === null || _b === void 0 ? void 0 : _b.split(",")) || [];
-        if (token) {
-            token = (0, crypto_1.decryptToken)(token);
-        }
-        const isValidToken = token ? yield validateToken(token) : false;
-        if (pathname === "/stt") {
-            console.log("STT route");
+        const pathname = url.pathname;
+        // Special handling for voice-agent when it's a Twilio request
+        if (pathname === "/voice-agent" && isTwilioRequest(request)) {
+            console.log("Handling Twilio voice agent connection");
             wss.handleUpgrade(request, socket, head, (ws) => {
-                if (!isValidToken || !token) {
-                    ws.close(3000, "Invalid token");
-                    return;
-                }
+                console.log("Twilio WebSocket connection established");
+                (0, handler_3.handleVoiceAgent)(ws, "en-US");
+            });
+            return;
+        }
+        const apiKey = url.searchParams.get("apiKey");
+        const token = url.searchParams.get("token");
+        const language = url.searchParams.get("lang") || "en-US";
+        const keywords = ((_a = url.searchParams.get("keywords")) === null || _a === void 0 ? void 0 : _a.split(",")) || [];
+        const utteranceTime = parseInt(url.searchParams.get("utteranceTime") || "1000");
+        const findAndReplaceStrings = ((_b = url.searchParams.get("findAndReplace")) === null || _b === void 0 ? void 0 : _b.split(",")) || [];
+        let isAuthenticated = false;
+        console.log("URL:", url);
+        console.log("API Key:", apiKey);
+        if (apiKey) {
+            isAuthenticated = yield validateAuth("apiKey", apiKey);
+        }
+        else if (token) {
+            const decryptedToken = (0, crypto_1.decryptToken)(token);
+            isAuthenticated = yield validateAuth("token", decryptedToken);
+        }
+        if (!isAuthenticated) {
+            throw new Error("Unauthorized");
+        }
+        if (pathname === "/stt") {
+            wss.handleUpgrade(request, socket, head, (ws) => {
                 ws.send(JSON.stringify({ type: "ConnectionStatus", status: "authenticated" }));
-                (0, handler_1.handleSTT)(ws, langauge, keywords, utteranceTime, findAndReplaceStrings);
+                (0, handler_1.handleSTT)(ws, language, keywords, utteranceTime, findAndReplaceStrings);
             });
         }
         else if (pathname === "/tts") {
-            console.log("TTS route");
             wss.handleUpgrade(request, socket, head, (ws) => {
-                if (!isValidToken || !token) {
-                    ws.close(3000, "Invalid token");
-                    return;
-                }
                 ws.send(JSON.stringify({ type: "ConnectionStatus", status: "authenticated" }));
                 (0, handler_2.handleTTS)(ws);
+            });
+        }
+        else if (pathname === "/voice-agent") {
+            console.log("Voice agent connection");
+            wss.handleUpgrade(request, socket, head, (ws) => {
+                ws.send(JSON.stringify({ type: "ConnectionStatus", status: "authenticated" }));
+                (0, handler_3.handleVoiceAgent)(ws, language);
             });
         }
         else {
@@ -92,23 +133,20 @@ server.on("upgrade", (request, socket, head) => __awaiter(void 0, void 0, void 0
         }
     }
     catch (error) {
-        if (error.message === "Invalid token" ||
-            error.message === "No token provided") {
-            console.error("Invalid token");
-            socket.write("HTTP/1.1 401 Web Socket Protocol Handshake\r\n" +
-                "Upgrade: WebSocket\r\n" +
-                "Connection: Upgrade\r\n" +
-                "\r\n");
-        }
-        console.error("Authentication error:", error);
+        console.error("Connection error:", error);
         socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
         socket.destroy();
     }
 }));
-app.get("/", (req, res) => {
-    res.send("Status: OK");
+// Error handling middleware
+app.use((err, req, res, next) => {
+    console.error(err.stack);
+    res.status(500).send("Something broke!");
 });
 const PORT = process.env.PORT || 5001;
+// Start the server
 server.listen(PORT, () => {
     console.log(`⚡️ [server]: Server is running on port ${PORT}`);
+    console.log(`HTTP: http://localhost:${PORT}`);
+    console.log(`WebSocket: ws://localhost:${PORT}`);
 });

@@ -15,7 +15,10 @@
   "dependencies": {
     "@deepgram/sdk": "^3.5.0",
     "dotenv": "^16.4.5",
+    "elevenlabs": "^1.51.0",
     "express": "^4.19.2",
+    "openai": "^4.84.0",
+    "twilio": "^5.4.4",
     "ws": "^8.18.0"
   },
   "devDependencies": {
