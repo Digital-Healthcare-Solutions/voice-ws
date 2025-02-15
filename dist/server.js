@@ -11,7 +11,6 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
-var _a;
 Object.defineProperty(exports, "__esModule", { value: true });
 // server.ts
 const express_1 = __importDefault(require("express"));
@@ -22,7 +21,7 @@ const handler_2 = require("./routes/tts/handler");
 const crypto_1 = require("./utils/crypto");
 const handler_3 = require("./routes/voice-agent-custom/handler");
 const VoiceResponse_1 = __importDefault(require("twilio/lib/twiml/VoiceResponse"));
-const handler_4 = require("./routes/voice-agent-deepgram/handler");
+const handler_4 = require("./routes/voice-agent-deepgram-demo/handler");
 const app = (0, express_1.default)();
 const server = http_1.default.createServer(app);
 const wss = new ws_1.default.Server({ noServer: true });
@@ -34,44 +33,42 @@ app.get("/", (req, res) => {
     res.send("Server is running");
 });
 // Express route for incoming Twilio calls
-app.post("/call/incoming", (_, res) => {
+app.post("/call/voice-agent-deepgram-demo", 
+// twilio.webhook(),
+(req, res) => {
+    var _a;
     const twiml = new VoiceResponse_1.default();
     const connect = twiml.connect();
-    // const stream = connect.stream({
-    //   url: `wss://${process.env.SERVER_DOMAIN}/voice-agent-custom?apiKey=test`,
-    // })
+    //get api_key from request
+    const apiKey = (_a = req.headers.authorization) === null || _a === void 0 ? void 0 : _a.split(" ")[1];
     const stream = connect.stream({
-        url: `wss://${process.env.SERVER_DOMAIN}/voice-agent-deepgram?apiKey=test`,
+        url: process.env.NODE_ENV === "production"
+            ? `wss://${process.env.SERVER_DOMAIN}/voice-agent-deepgram-demo`
+            : `wss://${process.env.SERVER_DOMAIN_DEV}/voice-agent-deepgram-demo`,
     });
     stream.parameter({
         name: "apiKey",
-        value: "test",
+        value: apiKey,
     });
     res.writeHead(200, { "Content-Type": "text/xml" });
     res.end(twiml.toString());
 });
-const API_KEYS = new Set(((_a = process.env.ALLOWED_API_KEYS) === null || _a === void 0 ? void 0 : _a.split(",")) || []);
-function validateAuth(authType, value) {
+function validateAuth(value) {
     return __awaiter(this, void 0, void 0, function* () {
-        if (authType === "apiKey") {
-            return API_KEYS.has(value);
+        try {
+            const response = yield fetch(process.env.AUTH_SERVER_URL || "", {
+                method: "GET",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${value}`,
+                },
+            });
+            const data = yield response.json();
+            return response.ok && data;
         }
-        else {
-            try {
-                const response = yield fetch(process.env.AUTH_SERVER_URL || "", {
-                    method: "GET",
-                    headers: {
-                        "Content-Type": "application/json",
-                        Authorization: `Bearer ${value}`,
-                    },
-                });
-                const data = yield response.json();
-                return response.ok && data;
-            }
-            catch (error) {
-                console.error("Auth error:", error);
-                return false;
-            }
+        catch (error) {
+            console.error("Auth error:", error);
+            return false;
         }
     });
 }
@@ -86,7 +83,7 @@ server.on("upgrade", (request, socket, head) => __awaiter(void 0, void 0, void 0
         const url = new URL(request.url || "", `http://${request.headers.host}`);
         const pathname = url.pathname;
         // Special handling for voice-agent when it's a Twilio request
-        if (pathname === "/voice-agent-deepgram" && isTwilioRequest(request)) {
+        if (pathname === "/voice-agent-deepgram-demo" && isTwilioRequest(request)) {
             console.log("Handling Twilio voice agent connection");
             wss.handleUpgrade(request, socket, head, (ws) => {
                 console.log("Twilio WebSocket connection established");
@@ -102,14 +99,9 @@ server.on("upgrade", (request, socket, head) => __awaiter(void 0, void 0, void 0
         const utteranceTime = parseInt(url.searchParams.get("utteranceTime") || "1000");
         const findAndReplaceStrings = ((_b = url.searchParams.get("findAndReplace")) === null || _b === void 0 ? void 0 : _b.split(",")) || [];
         let isAuthenticated = false;
-        console.log("URL:", url);
-        console.log("API Key:", apiKey);
-        if (apiKey) {
-            isAuthenticated = yield validateAuth("apiKey", apiKey);
-        }
-        else if (token) {
+        if (token) {
             const decryptedToken = (0, crypto_1.decryptToken)(token);
-            isAuthenticated = yield validateAuth("token", decryptedToken);
+            isAuthenticated = yield validateAuth(decryptedToken);
         }
         if (!isAuthenticated) {
             throw new Error("Unauthorized");

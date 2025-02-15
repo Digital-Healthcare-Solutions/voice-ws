@@ -1,5 +1,5 @@
 // server.ts
-import express, { Response } from "express"
+import express, { Response, Request } from "express"
 import http from "http"
 import WebSocket from "ws"
 import { handleSTT } from "./routes/stt/handler"
@@ -7,7 +7,8 @@ import { handleTTS } from "./routes/tts/handler"
 import { decryptToken } from "./utils/crypto"
 import { handleVoiceAgent } from "./routes/voice-agent-custom/handler"
 import VoiceResponse from "twilio/lib/twiml/VoiceResponse"
-import { handleDeepgramVoiceAgent } from "./routes/voice-agent-deepgram/handler"
+import { handleDeepgramVoiceAgent } from "./routes/voice-agent-deepgram-demo/handler"
+import twilio from "twilio"
 
 const app = express()
 const server = http.createServer(app)
@@ -23,46 +24,47 @@ app.get("/", (req, res) => {
 })
 
 // Express route for incoming Twilio calls
-app.post("/call/incoming", (_, res: Response) => {
-  const twiml = new VoiceResponse()
-  const connect = twiml.connect()
-  // const stream = connect.stream({
-  //   url: `wss://${process.env.SERVER_DOMAIN}/voice-agent-custom?apiKey=test`,
-  // })
-  const stream = connect.stream({
-    url: `wss://${process.env.SERVER_DOMAIN}/voice-agent-deepgram?apiKey=test`,
-  })
-  stream.parameter({
-    name: "apiKey",
-    value: "test",
-  })
-  res.writeHead(200, { "Content-Type": "text/xml" })
-  res.end(twiml.toString())
-})
+app.post(
+  "/call/voice-agent-deepgram-demo",
+  // twilio.webhook(),
+  (req: Request, res: Response) => {
+    const twiml = new VoiceResponse()
+    const connect = twiml.connect()
 
-const API_KEYS = new Set(process.env.ALLOWED_API_KEYS?.split(",") || [])
+    //get api_key from request
+    const apiKey = req.headers.authorization?.split(" ")[1]
 
-async function validateAuth(
-  authType: "token" | "apiKey",
-  value: string
-): Promise<boolean> {
-  if (authType === "apiKey") {
-    return API_KEYS.has(value)
-  } else {
-    try {
-      const response = await fetch(process.env.AUTH_SERVER_URL || "", {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${value}`,
-        },
-      })
-      const data = await response.json()
-      return response.ok && data
-    } catch (error) {
-      console.error("Auth error:", error)
-      return false
-    }
+    const stream = connect.stream({
+      url:
+        process.env.NODE_ENV === "production"
+          ? `wss://${process.env.SERVER_DOMAIN}/voice-agent-deepgram-demo`
+          : `wss://${process.env.SERVER_DOMAIN_DEV}/voice-agent-deepgram-demo`,
+    })
+
+    stream.parameter({
+      name: "apiKey",
+      value: apiKey,
+    })
+
+    res.writeHead(200, { "Content-Type": "text/xml" })
+    res.end(twiml.toString())
+  }
+)
+
+async function validateAuth(value: string): Promise<boolean> {
+  try {
+    const response = await fetch(process.env.AUTH_SERVER_URL || "", {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${value}`,
+      },
+    })
+    const data = await response.json()
+    return response.ok && data
+  } catch (error) {
+    console.error("Auth error:", error)
+    return false
   }
 }
 
@@ -78,7 +80,7 @@ server.on("upgrade", async (request, socket, head) => {
     const pathname = url.pathname
 
     // Special handling for voice-agent when it's a Twilio request
-    if (pathname === "/voice-agent-deepgram" && isTwilioRequest(request)) {
+    if (pathname === "/voice-agent-deepgram-demo" && isTwilioRequest(request)) {
       console.log("Handling Twilio voice agent connection")
       wss.handleUpgrade(request, socket, head, (ws) => {
         console.log("Twilio WebSocket connection established")
@@ -100,14 +102,9 @@ server.on("upgrade", async (request, socket, head) => {
 
     let isAuthenticated = false
 
-    console.log("URL:", url)
-    console.log("API Key:", apiKey)
-
-    if (apiKey) {
-      isAuthenticated = await validateAuth("apiKey", apiKey)
-    } else if (token) {
+    if (token) {
       const decryptedToken = decryptToken(token)
-      isAuthenticated = await validateAuth("token", decryptedToken)
+      isAuthenticated = await validateAuth(decryptedToken)
     }
 
     if (!isAuthenticated) {
