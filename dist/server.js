@@ -20,8 +20,9 @@ const ws_1 = __importDefault(require("ws"));
 const handler_1 = require("./routes/stt/handler");
 const handler_2 = require("./routes/tts/handler");
 const crypto_1 = require("./utils/crypto");
-const handler_3 = require("./routes/voice-agent/handler");
+const handler_3 = require("./routes/voice-agent-custom/handler");
 const VoiceResponse_1 = __importDefault(require("twilio/lib/twiml/VoiceResponse"));
+const handler_4 = require("./routes/voice-agent-deepgram/handler");
 const app = (0, express_1.default)();
 const server = http_1.default.createServer(app);
 const wss = new ws_1.default.Server({ noServer: true });
@@ -36,8 +37,11 @@ app.get("/", (req, res) => {
 app.post("/call/incoming", (_, res) => {
     const twiml = new VoiceResponse_1.default();
     const connect = twiml.connect();
+    // const stream = connect.stream({
+    //   url: `wss://${process.env.SERVER_DOMAIN}/voice-agent-custom?apiKey=test`,
+    // })
     const stream = connect.stream({
-        url: `wss://${process.env.SERVER_DOMAIN}/voice-agent?apiKey=test`,
+        url: `wss://${process.env.SERVER_DOMAIN}/voice-agent-deepgram?apiKey=test`,
     });
     stream.parameter({
         name: "apiKey",
@@ -82,11 +86,12 @@ server.on("upgrade", (request, socket, head) => __awaiter(void 0, void 0, void 0
         const url = new URL(request.url || "", `http://${request.headers.host}`);
         const pathname = url.pathname;
         // Special handling for voice-agent when it's a Twilio request
-        if (pathname === "/voice-agent" && isTwilioRequest(request)) {
+        if (pathname === "/voice-agent-deepgram" && isTwilioRequest(request)) {
             console.log("Handling Twilio voice agent connection");
             wss.handleUpgrade(request, socket, head, (ws) => {
                 console.log("Twilio WebSocket connection established");
-                (0, handler_3.handleVoiceAgent)(ws, "en-US");
+                // handleVoiceAgent(ws, "en-US")
+                (0, handler_4.handleDeepgramVoiceAgent)(ws, "en-US");
             });
             return;
         }

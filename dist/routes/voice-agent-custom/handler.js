@@ -22,7 +22,6 @@ dotenv_1.default.config();
 const openai = new openai_1.default();
 const elevenlabs = new elevenlabs_1.ElevenLabsClient();
 const KEEP_ALIVE_INTERVAL = 3 * 1000;
-let currentStreamSid = null;
 let isProcessing = false;
 function processWithAI(transcript) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -87,7 +86,7 @@ function streamToArrayBuffer(readableStream) {
         });
     });
 }
-function handleTwilioMessage(message, deepgramWrapper) {
+function handleTwilioMessage(message, deepgramWrapper, currentStreamSid = null) {
     try {
         const parsedMessage = JSON.parse(message);
         switch (parsedMessage.event) {
@@ -115,7 +114,7 @@ function handleTwilioMessage(message, deepgramWrapper) {
         console.error("Error processing Twilio message:", error);
     }
 }
-function sendAudioToTwilio(ws, audioData) {
+function sendAudioToTwilio(ws, audioData, currentStreamSid = null) {
     if (!currentStreamSid) {
         console.error("No StreamSID available");
         return;
@@ -135,7 +134,7 @@ function sendAudioToTwilio(ws, audioData) {
         console.error("Error sending audio to Twilio:", error);
     }
 }
-const setupDeepgram = (ws, lang) => {
+const setupDeepgram = (ws, lang, currentStreamSid = null) => {
     const deepgramClient = (0, sdk_1.createClient)(process.env.DEEPGRAM_API_KEY);
     let keepAlive = null;
     const deepgram = deepgramClient.listen.live({
@@ -168,7 +167,7 @@ const setupDeepgram = (ws, lang) => {
             try {
                 const aiResponse = yield processWithAI(transcript);
                 const audioData = yield convertToSpeech(aiResponse);
-                sendAudioToTwilio(ws, audioData);
+                sendAudioToTwilio(ws, audioData, currentStreamSid);
             }
             catch (error) {
                 console.error("Processing error:", error);
@@ -195,10 +194,11 @@ const setupDeepgram = (ws, lang) => {
 };
 function handleVoiceAgent(ws, lang) {
     console.log("Voice Agent: New connection established");
-    let { deepgram, finish } = setupDeepgram(ws, lang);
+    let currentStreamSid = null;
+    let { deepgram, finish } = setupDeepgram(ws, lang, currentStreamSid);
     let deepgramWrapper = deepgram;
     ws.on("message", (message) => {
-        handleTwilioMessage(message, deepgramWrapper);
+        handleTwilioMessage(message, deepgramWrapper, currentStreamSid);
     });
     ws.on("close", () => {
         console.log("Voice Agent: Connection closed");

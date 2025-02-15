@@ -5,8 +5,9 @@ import WebSocket from "ws"
 import { handleSTT } from "./routes/stt/handler"
 import { handleTTS } from "./routes/tts/handler"
 import { decryptToken } from "./utils/crypto"
-import { handleVoiceAgent } from "./routes/voice-agent/handler"
+import { handleVoiceAgent } from "./routes/voice-agent-custom/handler"
 import VoiceResponse from "twilio/lib/twiml/VoiceResponse"
+import { handleDeepgramVoiceAgent } from "./routes/voice-agent-deepgram/handler"
 
 const app = express()
 const server = http.createServer(app)
@@ -25,8 +26,11 @@ app.get("/", (req, res) => {
 app.post("/call/incoming", (_, res: Response) => {
   const twiml = new VoiceResponse()
   const connect = twiml.connect()
+  // const stream = connect.stream({
+  //   url: `wss://${process.env.SERVER_DOMAIN}/voice-agent-custom?apiKey=test`,
+  // })
   const stream = connect.stream({
-    url: `wss://${process.env.SERVER_DOMAIN}/voice-agent?apiKey=test`,
+    url: `wss://${process.env.SERVER_DOMAIN}/voice-agent-deepgram?apiKey=test`,
   })
   stream.parameter({
     name: "apiKey",
@@ -74,11 +78,12 @@ server.on("upgrade", async (request, socket, head) => {
     const pathname = url.pathname
 
     // Special handling for voice-agent when it's a Twilio request
-    if (pathname === "/voice-agent" && isTwilioRequest(request)) {
+    if (pathname === "/voice-agent-deepgram" && isTwilioRequest(request)) {
       console.log("Handling Twilio voice agent connection")
       wss.handleUpgrade(request, socket, head, (ws) => {
         console.log("Twilio WebSocket connection established")
-        handleVoiceAgent(ws, "en-US")
+        // handleVoiceAgent(ws, "en-US")
+        handleDeepgramVoiceAgent(ws, "en-US")
       })
       return
     }
