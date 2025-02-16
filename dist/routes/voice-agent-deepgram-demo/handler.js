@@ -8,49 +8,49 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.handleDeepgramVoiceAgent = handleDeepgramVoiceAgent;
 const sdk_1 = require("@deepgram/sdk");
+const cal_dot_com_apis_1 = require("../../utils/cal-dot-com-apis");
+const moment_1 = __importDefault(require("moment"));
 const deepgram = (0, sdk_1.createClient)(process.env.DEEPGRAM_API_KEY);
 function handleDeepgramVoiceAgent(ws, lang) {
     console.log("Setting up Deepgram Voice Agent");
     const connection = deepgram.agent();
     let keepAliveInterval;
     let currentStreamSid = null;
-    let isAgentSpeaking = false;
     let hasIssuedWarning = false;
     let silenceWarningTimeout;
     let silenceDisconnectTimeout;
-    function resetSilenceTimers() {
-        // Don't set new timers if the agent is speaking
-        if (isAgentSpeaking) {
-            console.log("Agent is speaking, not setting silence timers");
+    let isAgentResponding = false;
+    function startSilenceDetection() {
+        // Clear any existing timeouts
+        clearTimers();
+        // Don't set timers if the agent is in the middle of responding
+        if (isAgentResponding) {
             return;
         }
-        // Clear existing timeouts
-        clearTimers();
-        // Only set warning timer if we haven't already issued a warning
+        // Only set warning timer if we haven't warned yet
         if (!hasIssuedWarning) {
-            // Set new timeouts
             silenceWarningTimeout = setTimeout(() => {
-                // Double check agent isn't speaking before warning
-                if (!isAgentSpeaking) {
-                    console.log("No audio detected for 15 seconds, sending warning");
+                if (!isAgentResponding) {
+                    console.log("No interaction detected, sending warning");
                     hasIssuedWarning = true;
                     connection.injectAgentMessage("Are you still there?");
-                    // Set disconnect timeout after warning
                     silenceDisconnectTimeout = setTimeout(() => {
-                        // Final check that agent isn't speaking
-                        if (!isAgentSpeaking) {
+                        if (!isAgentResponding) {
                             console.log("No response after warning, ending call");
                             connection.injectAgentMessage("Since I haven't heard from you, I'll end the call now. Feel free to call back when you're ready. Goodbye!");
                             setTimeout(() => {
                                 ws.close();
-                            }, 6000); // Give time for the goodbye message to be spoken
+                            }, 6000);
                         }
-                    }, 7000); // 7 seconds after warning
+                    }, 7000);
                 }
-            }, 15000); // 15 seconds of silence
+            }, 15000);
         }
     }
     function clearTimers() {
@@ -66,10 +66,10 @@ function handleDeepgramVoiceAgent(ws, lang) {
             //   console.log("Received Twilio event:", data.event)
             switch (data.event) {
                 case "start":
-                    hasIssuedWarning = false; // Reset warning state on new call
-                    resetSilenceTimers();
                     currentStreamSid = data.start.streamSid;
                     console.log("Call started, StreamSID:", currentStreamSid);
+                    console.log("Day of the week:", (0, moment_1.default)().utcOffset("America/Chicago").format("dddd"));
+                    console.log("todays date:", (0, moment_1.default)().utcOffset("America/Chicago").format("YYYY/MM/DD"));
                     break;
                 case "media":
                     if (data.media && data.media.payload) {
@@ -95,7 +95,7 @@ function handleDeepgramVoiceAgent(ws, lang) {
     // Set up Deepgram connection handlers
     connection.on(sdk_1.AgentEvents.Open, () => __awaiter(this, void 0, void 0, function* () {
         console.log("Deepgram connection opened");
-        resetSilenceTimers();
+        startSilenceDetection();
         yield connection.configure({
             audio: {
                 input: {
@@ -125,11 +125,61 @@ function handleDeepgramVoiceAgent(ws, lang) {
                         // type: "groq",
                         type: "open_ai",
                     },
+                    // max_tokens: 200,
                     // model: "llama3-70b-8192",
                     model: "gpt-4o-mini",
-                    instructions: `Your name is Ava. You are a helpful AI assistant answering potential customer questions over the phone. The customer may ask about products, services, or schedule a demo. You should be polite, helpful, and informative. Product information is as follows:
+                    instructions: `Your name is Ava. You are a helpful AI assistant answering potential customer questions over the phone. The customer may ask about products, services, or schedule a demo. You should be polite, helpful, and informative. For demos, the current date is $${(0, moment_1.default)()
+                        .utcOffset("America/Chicago")
+                        .format("YYYY/MM/DD")} and the current day of the week is ${(0, moment_1.default)()
+                        .utcOffset("America/Chicago")
+                        .format("dddd")}. If the user says for instance 'next week works best for me', you should search all the dates for that specfic week. You should never list out all dates but just suggest a few of them (max 3). You do not need to know what products they are interested in to suggest available time slots. Some dates are as follows: tommorow is ${(0, moment_1.default)()
+                        .add(1, "days")
+                        .utcOffset("America/Chicago")
+                        .format("dddd")}, ${(0, moment_1.default)()
+                        .utcOffset("America/Chicago")
+                        .add(1, "days")
+                        .format("YYYY/MM/DD")}, the next day is ${(0, moment_1.default)()
+                        .add(2, "days")
+                        .utcOffset("America/Chicago")
+                        .format("dddd")}, ${(0, moment_1.default)()
+                        .utcOffset("America/Chicago")
+                        .add(2, "days")
+                        .format("YYYY/MM/DD")}, and the day after that is ${(0, moment_1.default)()
+                        .add(3, "days")
+                        .utcOffset("America/Chicago")
+                        .format("dddd")}, ${(0, moment_1.default)()
+                        .utcOffset("America/Chicago")
+                        .add(3, "days")
+                        .format("YYYY/MM/DD")}, and the day after that is ${(0, moment_1.default)()
+                        .add(4, "days")
+                        .utcOffset("America/Chicago")
+                        .format("dddd")}, ${(0, moment_1.default)()
+                        .utcOffset("America/Chicago")
+                        .add(4, "days")
+                        .format("YYYY/MM/DD")}, and the day after that is ${(0, moment_1.default)()
+                        .add(5, "days")
+                        .utcOffset("America/Chicago")
+                        .format("dddd")}, ${(0, moment_1.default)()
+                        .utcOffset("America/Chicago")
+                        .add(5, "days")
+                        .format("YYYY/MM/DD")}., and the day after that is ${(0, moment_1.default)()
+                        .add(6, "days")
+                        .utcOffset("America/Chicago")
+                        .format("dddd")}, ${(0, moment_1.default)()
+                        .utcOffset("America/Chicago")
+                        .add(6, "days")
+                        .format("YYYY/MM/DD")}, and the day after that is ${(0, moment_1.default)()
+                        .add(7, "days")
+                        .utcOffset("America/Chicago")
+                        .format("dddd")}, ${(0, moment_1.default)()
+                        .utcOffset("America/Chicago")
+                        .add(7, "days")
+                        .format("YYYY/MM/DD")}. When listing appointments to the user you should reply with for instance '10 o clock AM' instead of '10:00 AM'.
+            
+          
+          Product information is as follows:
 
-            ## Echo (AI Scribe)
+            ## Echo 
             - Echo is an AI Scribe tool that listens to patient-doctor conversations in realtime and automatically generates clinical notes. Doctors can customize the notes that are generated using a drag and drop interface. Echo is HIPAA compliant and integrates with most EHR systems.
             - Echo is available as a subscription service with 3 tiers: Free, Individual ($100 per month) and Team ($250 per month). The Free tier includes basic features, while the Individual and Team tiers include additional features like custom templates and team collaboration and the team plan includes 10 users. Team and individual plans include a 14-day free trial.
 
@@ -142,7 +192,7 @@ function handleDeepgramVoiceAgent(ws, lang) {
             - Our AI powered Efax service revolutionizes the typical fax workflow. It allows you to send and receive faxes from your computer or mobile device through our web app. The service automatically extracts key information from faxes such as patient names and date of births, insurance information, chief complaints, and more. You can also add custom labels that will automatically be intelligently assigned to the fax if it matches. For instance all faxes for headaches or diabetes will be under their apporpriate labels. This allows you to search faxes by patient, sender, or by what the fax was sent for, giving you more control and ability to see all the analytics about referrals sent to your practice and who is sending you patients. Users can purchase fax numbers from our platform or port their existing fax numbers to our platform, ensuring zero downtime and no need to change your fax number. 
             - The service is available as an add on subscription service with usage based pricing. The default plan is $150 per month and includes 3000 fax pages per month. Additional pages are billed at $0.06 per outbound page and $0.075 per inbound page. Additional fax numbers are billed at $10 per month per number. The service includes a 14-day free trial. The service is HIPAA compliant and integrates with most EHR systems. The service can be set up in as little as 1-2 days. The service can also be customized to include additional features like custom labels and webhooks.
 
-            ## Digital Forms (Smartform)
+            ## Digital Forms 
 
             - Smartform is a patient paperwork automation tool that allows users to create custom forms with a drag and drop interface. Users can publish their forms to a public link, send them via email or text, or embed them on their website. Patients can fill out the forms on their computer or mobile device and the data is automatically saved to the user's account. Users can also set up custom notifications and alerts based on the form responses. The forms can be customized to include conditional logic, required fields, password protection, and custom branding. Some common fields used on forms include text fields, signature fields, date fields, checkboxes, medication pickers, surgery history pickers and more. The forms can be used for patient intake, consent forms, surveys, and more.
 
@@ -151,7 +201,7 @@ function handleDeepgramVoiceAgent(ws, lang) {
                     functions: [
                         {
                             name: "hang_up",
-                            description: "hang up the phone call when you are done.",
+                            description: "hang up the phone call when you the user is done with questions, or after you have called the book_time_slot function and there are no further questions. Do niot hang up abruptly on the user.",
                             parameters: {
                                 type: "object",
                                 properties: {
@@ -171,7 +221,7 @@ function handleDeepgramVoiceAgent(ws, lang) {
                                 type: "object",
                                 properties: {
                                     message: {
-                                        type: "string", // the type of the input
+                                        type: "string",
                                         description: "The voicemail message to play to the user",
                                     },
                                     timeout: {
@@ -181,6 +231,76 @@ function handleDeepgramVoiceAgent(ws, lang) {
                                 },
                                 // @ts-ignore
                                 required: ["message", "timeout"],
+                            },
+                        },
+                        {
+                            name: "get_available_time_slots",
+                            description: "Get the available time slots for a given date range. You should call this function first when the user asks to schedule a demo. After you get the available time slots, you should present a few options to the user and ask them to choose one." +
+                                `the current date is ${(0, moment_1.default)()
+                                    .utcOffset("America/Chicago")
+                                    .format("YYYY/MM/DD")} and the current day of the week is  ${(0, moment_1.default)()
+                                    .utcOffset("America/Chicago")
+                                    .format("dddd")}`,
+                            parameters: {
+                                type: "object",
+                                properties: {
+                                    start: {
+                                        type: "string",
+                                        description: "The start date for the time slots to search for. (in YYYY-MM-DD format)",
+                                    },
+                                    end: {
+                                        type: "string",
+                                        description: "The end date for the time slots to search for. (in YYYY-MM-DD format)",
+                                    },
+                                },
+                                // @ts-ignore
+                                required: ["start", "end"],
+                            },
+                        },
+                        {
+                            name: "book_time_slot",
+                            description: `Book a time slot for a demo. You may need the users name, email, and phone number before calling this. You should call this function after the user has chosen a time slot and you have confirmed it with them. You should confirm the booking with the user and provide any additional information they may need. You should confirm their email before calling this function.`,
+                            parameters: {
+                                type: "object",
+                                properties: {
+                                    start: {
+                                        type: "string",
+                                        description: "The start date for the time slot to book. (in YYYY-MM-DDTHH:mm:ssZ format)",
+                                    },
+                                    name: {
+                                        type: "string",
+                                        description: "The name of the person booking the demo",
+                                    },
+                                    phoneNumber: {
+                                        type: "string",
+                                        description: "The phone number of the person booking the demo",
+                                    },
+                                    email: {
+                                        type: "string",
+                                        description: "The email of the person booking the demo",
+                                    },
+                                    notes: {
+                                        type: "string",
+                                        description: "Any additional notes or comments for the booking (made by you, the agent)",
+                                    },
+                                },
+                                // @ts-ignore
+                                required: ["start", "name", "phoneNumber", "email", "notes"],
+                            },
+                        },
+                        {
+                            name: "confirm_email",
+                            description: "Confirm the email address of the user. You should call this function after the user has provided their email address.You should reformat the user provided email text to an actual email (ie. John doe sixty seven at hot mail dot com -> johndoe67@hotmail.com).",
+                            parameters: {
+                                type: "object",
+                                properties: {
+                                    emailToConfirm: {
+                                        type: "string",
+                                        description: "The email address to confirm. Read this back to the user to confirm the email.",
+                                    },
+                                },
+                                // @ts-ignore
+                                required: ["emailToConfirm"],
                             },
                         },
                     ],
@@ -205,26 +325,13 @@ function handleDeepgramVoiceAgent(ws, lang) {
         //   void connection.keepAlive()
         // }, 5000)
     }));
-    //   connection.on(AgentEvents.Welcome, (message) => {
-    //     console.log("Deepgram welcome message:", message)
-    //     const audioFile = fs.readFileSync("./public/ava-intro.ulaw")
-    //     const audioData = Buffer.from(audioFile).toString("base64")
-    //     const avaMessage = {
-    //       event: "media",
-    //       streamSid: currentStreamSid,
-    //       media: {
-    //         payload: audioData,
-    //       },
-    //     }
-    //     ws.send(JSON.stringify(avaMessage))
-    //   })
     // Handle incoming audio from Deepgram
     connection.on(sdk_1.AgentEvents.Audio, (audio) => {
         if (!currentStreamSid) {
             console.log("No StreamSID available, cannot send audio");
             return;
         }
-        // Send audio back to Twilio in the expected format
+        // Send audio to Twilio
         const message = {
             event: "media",
             streamSid: currentStreamSid,
@@ -236,40 +343,43 @@ function handleDeepgramVoiceAgent(ws, lang) {
     });
     // Handle various Deepgram events
     connection.on(sdk_1.AgentEvents.Error, (error) => {
-        console.error("Deepgram error:", error);
+        console.log("Deepgram error:", error);
     });
     connection.on(sdk_1.AgentEvents.UserStartedSpeaking, (message) => {
-        console.error("Deepgram user started speaking:", message);
-        hasIssuedWarning = false; // Reset warning state when user speaks
-        resetSilenceTimers();
-        //interupt the agent. make it stop speaking
+        console.log("Deepgram user started speaking:", message);
+        hasIssuedWarning = false;
+        isAgentResponding = false;
+        clearTimers();
         ws.send(JSON.stringify({
             event: "clear",
             streamSid: currentStreamSid,
         }));
     });
     connection.on(sdk_1.AgentEvents.AgentAudioDone, (message) => {
-        console.error("Deepgram agent audio done:", message);
-        isAgentSpeaking = false;
-        // Reset silence detection after agent finishes speaking
-        if (!hasIssuedWarning) {
-            resetSilenceTimers();
-        }
+        console.log("Deepgram agent audio done:", message);
+        // Add a small delay to ensure all audio is done
+        setTimeout(() => {
+            console.log("Agent response complete, starting silence detection");
+            isAgentResponding = false;
+            startSilenceDetection();
+        }, 3000);
     });
     connection.on(sdk_1.AgentEvents.AgentStartedSpeaking, (message) => {
-        console.error("Deepgram agent started speaking:", message);
-        isAgentSpeaking = true;
-        // Clear timers while agent is speaking
+        console.log("Deepgram agent started speaking:", message);
+        isAgentResponding = true;
         clearTimers();
     });
     connection.on(sdk_1.AgentEvents.AgentThinking, (message) => {
-        console.error("Deepgram agent thinking:", message);
-        // Consider the agent as speaking while thinking to prevent timeout
-        isAgentSpeaking = true;
+        console.log("Deepgram agent thinking:", message);
     });
     // Log agent messages for debugging
     connection.on(sdk_1.AgentEvents.ConversationText, (message) => {
         console.log("User message:", message);
+        if (message.role === "assistant") {
+            console.log("Agent starting new response");
+            isAgentResponding = true;
+            clearTimers();
+        }
     });
     connection.on(sdk_1.AgentEvents.FunctionCallRequest, (message) => {
         console.log("Function Call Request:", message);
@@ -286,6 +396,52 @@ function handleDeepgramVoiceAgent(ws, lang) {
                 ws.close();
             }, message.input.timeout * 1000 || 10000);
         }
+        if (message.function_name === "confirm_email") {
+            connection.functionCallResponse({
+                function_call_id: message.function_call_id,
+                output: JSON.stringify({
+                    confirmed: true,
+                    emailToUse: message.input.emailToConfirm,
+                }),
+            });
+        }
+        if (message.function_name === "get_available_time_slots") {
+            console.log("Getting available time slots");
+            isAgentResponding = true;
+            clearTimers();
+            connection.injectAgentMessage(`I can help you with that. Let me check the available time slots for you.`);
+            (0, cal_dot_com_apis_1.getAvailableTimeSlots)(message.input.start, message.input.end)
+                .then((data) => {
+                console.log("Available time slots:", data);
+                connection.functionCallResponse({
+                    function_call_id: message.function_call_id,
+                    output: JSON.stringify(data),
+                });
+            })
+                .catch((error) => {
+                console.error("Error getting available time slots:", error);
+                isAgentResponding = false;
+                connection.injectAgentMessage(`I'm sorry, I'm having trouble finding available time slots right now.`);
+            });
+        }
+        if (message.function_name === "book_time_slot") {
+            console.log("Booking time slot");
+            isAgentResponding = true;
+            clearTimers();
+            (0, cal_dot_com_apis_1.bookTimeSlot)(message.input.start, message.input.name, message.input.phoneNumber, message.input.email, message.input.notes)
+                .then((data) => {
+                console.log("Booking successful:", data);
+                connection.functionCallResponse({
+                    function_call_id: message.function_call_id,
+                    output: JSON.stringify(data),
+                });
+            })
+                .catch((error) => {
+                console.error("Error booking time slot:", error);
+                isAgentResponding = false;
+                connection.injectAgentMessage(`I'm sorry, I'm having trouble booking the time slot right now.`);
+            });
+        }
     });
     connection.on(sdk_1.AgentEvents.FunctionCalling, (message) => {
         console.log("Function Calling:", message);
@@ -295,9 +451,8 @@ function handleDeepgramVoiceAgent(ws, lang) {
     });
     connection.on(sdk_1.AgentEvents.Close, () => {
         console.log("Deepgram connection closed");
-        // clearInterval(keepAliveInterval)
-        currentStreamSid = null;
         connection.removeAllListeners();
+        currentStreamSid = null;
         ws.close();
         clearTimers();
     });
@@ -309,7 +464,6 @@ function handleDeepgramVoiceAgent(ws, lang) {
         console.log("Twilio connection closed");
         connection.removeAllListeners();
         connection.disconnect();
-        // clearInterval(keepAliveInterval)
         currentStreamSid = null;
         clearTimers();
     });
@@ -317,7 +471,6 @@ function handleDeepgramVoiceAgent(ws, lang) {
         console.error("WebSocket error:", error);
         connection.removeAllListeners();
         connection.disconnect();
-        // clearInterval(keepAliveInterval)
         currentStreamSid = null;
         clearTimers();
     });
