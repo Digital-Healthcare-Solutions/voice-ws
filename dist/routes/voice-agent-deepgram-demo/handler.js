@@ -23,6 +23,7 @@ function handleDeepgramVoiceAgent(ws, lang) {
     let keepAliveInterval;
     let currentStreamSid = null;
     let hasIssuedWarning = false;
+    let isWarningInProgress = false;
     let silenceWarningTimeout;
     let silenceDisconnectTimeout;
     let isAgentResponding = false;
@@ -39,6 +40,7 @@ function handleDeepgramVoiceAgent(ws, lang) {
                 if (!isAgentResponding) {
                     console.log("No interaction detected, sending warning");
                     hasIssuedWarning = true;
+                    isWarningInProgress = true; // Mark that we're in warning mode
                     connection.injectAgentMessage("Are you still there?");
                     silenceDisconnectTimeout = setTimeout(() => {
                         if (!isAgentResponding) {
@@ -46,7 +48,7 @@ function handleDeepgramVoiceAgent(ws, lang) {
                             connection.injectAgentMessage("Since I haven't heard from you, I'll end the call now. Feel free to call back when you're ready. Goodbye!");
                             setTimeout(() => {
                                 ws.close();
-                            }, 6000);
+                            }, 6500);
                         }
                     }, 7000);
                 }
@@ -349,6 +351,7 @@ function handleDeepgramVoiceAgent(ws, lang) {
         console.log("Deepgram user started speaking:", message);
         hasIssuedWarning = false;
         isAgentResponding = false;
+        isWarningInProgress = false;
         clearTimers();
         ws.send(JSON.stringify({
             event: "clear",
@@ -357,15 +360,30 @@ function handleDeepgramVoiceAgent(ws, lang) {
     });
     connection.on(sdk_1.AgentEvents.AgentAudioDone, (message) => {
         console.log("Deepgram agent audio done:", message);
+        if (isWarningInProgress) {
+            console.log("Warning in progress; not restarting silence detection.");
+            return;
+        }
         // Add a small delay to ensure all audio is done
+        isAgentResponding = false;
         setTimeout(() => {
             console.log("Agent response complete, starting silence detection");
-            isAgentResponding = false;
             startSilenceDetection();
         }, 3000);
     });
     connection.on(sdk_1.AgentEvents.AgentStartedSpeaking, (message) => {
         console.log("Deepgram agent started speaking:", message);
+        if (isWarningInProgress) {
+            console.log("Detected warning message; ignoring as user response.");
+            // Reset the flag after a short delay (if necessary)
+            // setTimeout(() => {
+            //   isWarningMessage = false
+            // }, 500)
+            setTimeout(() => {
+                isWarningInProgress = false;
+            }, 500);
+            return;
+        }
         isAgentResponding = true;
         clearTimers();
     });
@@ -377,6 +395,10 @@ function handleDeepgramVoiceAgent(ws, lang) {
         console.log("User message:", message);
         if (message.role === "assistant") {
             console.log("Agent starting new response");
+            if (isWarningInProgress) {
+                console.log("Detected warning message; ignoring as user response.");
+                return;
+            }
             isAgentResponding = true;
             clearTimers();
         }
