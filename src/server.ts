@@ -35,10 +35,10 @@ app.post(
     const apiKey = req.headers.authorization?.split(" ")[1]
 
     const stream = connect.stream({
-      url:
-        process.env.NODE_ENV === "production"
-          ? `wss://${process.env.SERVER_DOMAIN}/voice-agent-deepgram-demo`
-          : `wss://${process.env.SERVER_DOMAIN_DEV}/voice-agent-deepgram-demo`,
+      url: `wss://${process.env.SERVER_DOMAIN}/voice-agent-deepgram-demo`,
+      // process.env.NODE_ENV === "production"
+      //   ? `wss://${process.env.SERVER_DOMAIN}/voice-agent-deepgram-demo`
+      //   : `wss://${process.env.SERVER_DOMAIN_DEV}/voice-agent-deepgram-demo`,
     })
 
     stream.parameter({
