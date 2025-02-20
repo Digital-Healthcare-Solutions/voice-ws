@@ -149,7 +149,7 @@ app.use((err: any, req: any, res: any, next: any) => {
   res.status(500).send("Something broke!")
 })
 
-const PORT = process.env.PORT || 5001
+const PORT = process.env.PORT || 5000
 
 // Start the server
 server.listen(PORT, () => {
